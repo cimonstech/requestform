@@ -1,0 +1,12 @@
+{
+  "name": "Equipment Request Form",
+  "short_name": "Request Form",
+  "description": "Submit and manage equipment requests",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "orientation": "portrait-primary",
+  "icons": []
+}
+
