@@ -31,6 +31,32 @@ export default function EquipmentRequestForm() {
   const [requesterDate, setRequesterDate] = useState(new Date().toISOString().split('T')[0])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const [errors, setErrors] = useState<Record<string, string>>({})
+
+  // Get today's date in YYYY-MM-DD format for min date validation
+  const today = new Date().toISOString().split('T')[0]
+
+  // Validate email format
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    return emailRegex.test(email)
+  }
+
+  // Validate integer (quantity)
+  const validateInteger = (value: string): boolean => {
+    if (value === '') return true // Allow empty (optional field)
+    const num = parseInt(value, 10)
+    return !isNaN(num) && num > 0 && num.toString() === value.trim()
+  }
+
+  // Validate date is not in the past
+  const validateDateNotPast = (date: string): boolean => {
+    if (date === '') return true // Allow empty (optional field)
+    const selectedDate = new Date(date)
+    const todayDate = new Date()
+    todayDate.setHours(0, 0, 0, 0)
+    return selectedDate >= todayDate
+  }
 
   const addEquipmentRow = () => {
     setEquipmentItems([
@@ -46,6 +72,50 @@ export default function EquipmentRequestForm() {
   }
 
   const updateEquipmentItem = (id: string, field: keyof EquipmentItem, value: string) => {
+    // Validate quantity field - only allow integers
+    if (field === 'quantity') {
+      // Allow empty, digits only, and positive integers
+      if (value === '' || /^\d+$/.test(value)) {
+        setEquipmentItems(
+          equipmentItems.map(item =>
+            item.id === id ? { ...item, [field]: value } : item
+          )
+        )
+        // Clear error for this field
+        setErrors(prev => {
+          const newErrors = { ...prev }
+          delete newErrors[`quantity-${id}`]
+          return newErrors
+        })
+      }
+      return
+    }
+
+    // Validate required date - cannot be in the past
+    if (field === 'requiredDate') {
+      if (validateDateNotPast(value)) {
+        setEquipmentItems(
+          equipmentItems.map(item =>
+            item.id === id ? { ...item, [field]: value } : item
+          )
+        )
+        // Clear error for this field
+        setErrors(prev => {
+          const newErrors = { ...prev }
+          delete newErrors[`requiredDate-${id}`]
+          return newErrors
+        })
+      } else {
+        // Set error for past date
+        setErrors(prev => ({
+          ...prev,
+          [`requiredDate-${id}`]: 'Required date cannot be in the past'
+        }))
+      }
+      return
+    }
+
+    // For other fields, update normally
     setEquipmentItems(
       equipmentItems.map(item =>
         item.id === id ? { ...item, [field]: value } : item
@@ -58,28 +128,57 @@ export default function EquipmentRequestForm() {
     setIsSubmitting(true)
     setSubmitStatus('idle')
 
+    // Clear previous errors
+    setErrors({})
+
     // Validation
-    if (!requesterName.trim() || !requesterEmail.trim()) {
-      alert('Please fill in requester name and email')
-      setIsSubmitting(false)
-      return
+    const validationErrors: Record<string, string> = {}
+
+    if (!requesterName.trim()) {
+      validationErrors.requesterName = 'Requester name is required'
     }
 
-    if (equipmentItems.some(item => !item.name.trim())) {
-      alert('Please fill in equipment description for all items')
-      setIsSubmitting(false)
-      return
+    if (!requesterEmail.trim()) {
+      validationErrors.requesterEmail = 'Email is required'
+    } else if (!validateEmail(requesterEmail)) {
+      validationErrors.requesterEmail = 'Please enter a valid email address'
     }
+
+    // Validate equipment items
+    equipmentItems.forEach((item, index) => {
+      if (!item.name.trim()) {
+        validationErrors[`equipmentName-${item.id}`] = 'Equipment description is required'
+      }
+
+      if (item.quantity && !validateInteger(item.quantity)) {
+        validationErrors[`quantity-${item.id}`] = 'Quantity must be a positive integer'
+      }
+
+      if (item.requiredDate && !validateDateNotPast(item.requiredDate)) {
+        validationErrors[`requiredDate-${item.id}`] = 'Required date cannot be in the past'
+      }
+    })
 
     if (signatureType === 'typed' && !typedSignature.trim()) {
-      alert('Please provide a typed signature')
-      setIsSubmitting(false)
-      return
+      validationErrors.signature = 'Please provide a typed signature'
     }
 
     if (signatureType === 'drawn' && !signatureImage) {
-      alert('Please provide a signature')
+      validationErrors.signature = 'Please provide a signature'
+    }
+
+    // If there are validation errors, show them and stop submission
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors)
       setIsSubmitting(false)
+      // Scroll to first error
+      const firstErrorField = Object.keys(validationErrors)[0]
+      const errorElement = document.querySelector(`[data-error="${firstErrorField}"]`) || 
+                          document.querySelector(`[name="${firstErrorField}"]`)
+      if (errorElement) {
+        errorElement.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        ;(errorElement as HTMLElement).focus()
+      }
       return
     }
 
@@ -144,6 +243,7 @@ export default function EquipmentRequestForm() {
         setTypedSignature('')
         setSignatureImage(null)
         setRequesterDate(new Date().toISOString().split('T')[0])
+        setErrors({}) // Clear all validation errors
       } else {
         const errorData = await response.json().catch(() => ({}))
         throw new Error(errorData.error || 'Failed to send email')
@@ -242,11 +342,28 @@ export default function EquipmentRequestForm() {
               <input
                 type="text"
                 id="requesterName"
+                name="requesterName"
+                data-error="requesterName"
                 value={requesterName}
-                onChange={(e) => setRequesterName(e.target.value)}
+                onChange={(e) => {
+                  setRequesterName(e.target.value)
+                  // Clear error when user types
+                  if (errors.requesterName) {
+                    setErrors(prev => {
+                      const newErrors = { ...prev }
+                      delete newErrors.requesterName
+                      return newErrors
+                    })
+                  }
+                }}
                 required
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all shadow-sm hover:shadow-md"
+                className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all shadow-sm hover:shadow-md ${
+                  errors.requesterName ? 'border-red-500' : 'border-gray-300'
+                }`}
               />
+              {errors.requesterName && (
+                <p className="mt-1 text-sm text-red-600">{errors.requesterName}</p>
+              )}
             </div>
             <div>
               <label htmlFor="requesterEmail" className="block text-sm font-medium text-gray-700 mb-1">
@@ -255,11 +372,28 @@ export default function EquipmentRequestForm() {
               <input
                 type="email"
                 id="requesterEmail"
+                name="requesterEmail"
+                data-error="requesterEmail"
                 value={requesterEmail}
-                onChange={(e) => setRequesterEmail(e.target.value)}
+                onChange={(e) => {
+                  setRequesterEmail(e.target.value)
+                  // Clear error when user types
+                  if (errors.requesterEmail) {
+                    setErrors(prev => {
+                      const newErrors = { ...prev }
+                      delete newErrors.requesterEmail
+                      return newErrors
+                    })
+                  }
+                }}
                 required
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all shadow-sm hover:shadow-md"
+                className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all shadow-sm hover:shadow-md ${
+                  errors.requesterEmail ? 'border-red-500' : 'border-gray-300'
+                }`}
               />
+              {errors.requesterEmail && (
+                <p className="mt-1 text-sm text-red-600">{errors.requesterEmail}</p>
+              )}
             </div>
             <div>
               <label htmlFor="requesterPosition" className="block text-sm font-medium text-gray-700 mb-1">
@@ -270,18 +404,6 @@ export default function EquipmentRequestForm() {
                 id="requesterPosition"
                 value={requesterPosition}
                 onChange={(e) => setRequesterPosition(e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all shadow-sm hover:shadow-md"
-              />
-            </div>
-            <div>
-              <label htmlFor="requesterDate" className="block text-sm font-medium text-gray-700 mb-1">
-                Date
-              </label>
-              <input
-                type="date"
-                id="requesterDate"
-                value={requesterDate}
-                onChange={(e) => setRequesterDate(e.target.value)}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all shadow-sm hover:shadow-md"
               />
             </div>
@@ -325,10 +447,26 @@ export default function EquipmentRequestForm() {
                     <input
                       type="text"
                       value={item.name}
-                      onChange={(e) => updateEquipmentItem(item.id, 'name', e.target.value)}
+                      onChange={(e) => {
+                        updateEquipmentItem(item.id, 'name', e.target.value)
+                        // Clear error when user types
+                        if (errors[`equipmentName-${item.id}`]) {
+                          setErrors(prev => {
+                            const newErrors = { ...prev }
+                            delete newErrors[`equipmentName-${item.id}`]
+                            return newErrors
+                          })
+                        }
+                      }}
+                      data-error={`equipmentName-${item.id}`}
                       required
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all shadow-sm hover:shadow-md"
+                      className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all shadow-sm hover:shadow-md ${
+                        errors[`equipmentName-${item.id}`] ? 'border-red-500' : 'border-gray-300'
+                      }`}
                     />
+                    {errors[`equipmentName-${item.id}`] && (
+                      <p className="mt-1 text-sm text-red-600">{errors[`equipmentName-${item.id}`]}</p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -336,10 +474,19 @@ export default function EquipmentRequestForm() {
                     </label>
                     <input
                       type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       value={item.quantity}
                       onChange={(e) => updateEquipmentItem(item.id, 'quantity', e.target.value)}
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all shadow-sm hover:shadow-md"
+                      data-error={`quantity-${item.id}`}
+                      className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all shadow-sm hover:shadow-md ${
+                        errors[`quantity-${item.id}`] ? 'border-red-500' : 'border-gray-300'
+                      }`}
+                      placeholder="Enter number"
                     />
+                    {errors[`quantity-${item.id}`] && (
+                      <p className="mt-1 text-sm text-red-600">{errors[`quantity-${item.id}`]}</p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -359,9 +506,16 @@ export default function EquipmentRequestForm() {
                     <input
                       type="date"
                       value={item.requiredDate}
+                      min={today}
                       onChange={(e) => updateEquipmentItem(item.id, 'requiredDate', e.target.value)}
-                      className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all shadow-sm hover:shadow-md"
+                      data-error={`requiredDate-${item.id}`}
+                      className={`w-full px-4 py-2.5 border rounded-lg focus:ring-2 focus:ring-primary focus:border-primary transition-all shadow-sm hover:shadow-md ${
+                        errors[`requiredDate-${item.id}`] ? 'border-red-500' : 'border-gray-300'
+                      }`}
                     />
+                    {errors[`requiredDate-${item.id}`] && (
+                      <p className="mt-1 text-sm text-red-600">{errors[`requiredDate-${item.id}`]}</p>
+                    )}
                   </div>
                 </div>
               </div>

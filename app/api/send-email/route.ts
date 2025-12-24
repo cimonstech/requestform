@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
 import { storeRequest, getNextRequestNumber, getAllRequestIds, generateApprovalToken } from '@/utils/requestStore'
 
-// Testing: Using only chasetetteh3@gmail.com
-// TODO: Update with all recipients after testing
+// All recipient emails for equipment request notifications
 const RECIPIENT_EMAILS = [
+  
   'chasetetteh3@gmail.com'
 ]
 
@@ -85,14 +85,14 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Try port 587 first, fallback to 465 if it fails
-    const smtpPort = parseInt(process.env.SMTP_PORT || '587')
+    // Try port 465 first (SSL) since it's more reliable, fallback to 587 if needed
+    // If SMTP_PORT is explicitly set, use that; otherwise default to 465
+    const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 465
     let transporter = createTransporter(smtpPort, smtpPort === 465)
-    let usePort465 = false
+    let usePort465 = smtpPort === 465
 
     // Skip SMTP verification to speed up the process - just try sending directly
-    // If it fails, we'll try the fallback port
-    console.log(`Using SMTP port ${smtpPort} (verification skipped for speed)`)
+    console.log(`Using SMTP port ${smtpPort} (${usePort465 ? 'SSL' : 'TLS'})`)
 
     // Generate secure approval token
     const approvalToken = generateApprovalToken()
@@ -122,6 +122,18 @@ export async function POST(request: NextRequest) {
     storeRequest(requestId, formDataForStore)
     console.log('Request stored successfully:', { requestId, requesterEmail })
     
+    // Email sender name
+    const senderEmail = process.env.SMTP_FROM || process.env.SMTP_USER || ''
+    const senderName = 'RequestsbyCimons'
+    const fromAddress = `${senderName} <${senderEmail}>`
+    
+    // Footer for all emails
+    const emailFooter = `
+      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 12px;">
+        <p style="margin: 5px 0;">Powered by <a href="https://wa.me/233553018172" style="color: #2563eb; text-decoration: none; font-weight: 600;">Cimons Technologies</a></p>
+      </div>
+    `
+    
     // Email content
     const emailSubject = `Equipment Request from ${requesterName}`
     const approvalLink = `${baseUrl}/approve/${requestId}?token=${approvalToken}`
@@ -140,6 +152,7 @@ export async function POST(request: NextRequest) {
         <a href="${approvalLink}" style="display: inline-block; padding: 12px 24px; background-color: #2563eb; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; margin-right: 10px;">Review & Approve</a>
       </div>
       <p style="color: #666; font-size: 12px; margin-top: 20px;">Or copy this link: ${approvalLink}</p>
+      ${emailFooter}
     `
 
     // Send emails asynchronously (don't wait for them to complete)
@@ -149,9 +162,29 @@ export async function POST(request: NextRequest) {
         // Send emails to all recipients
         const emailPromises = RECIPIENT_EMAILS.map(async (email) => {
           try {
-            await Promise.race([
-              transporter.sendMail({
-                from: process.env.SMTP_FROM || process.env.SMTP_USER,
+            // Try sending with current transporter (no timeout since it's async)
+            await transporter.sendMail({
+              from: fromAddress,
+              to: email,
+              subject: emailSubject,
+              html: emailBody,
+              attachments: [
+                {
+                  filename: 'equipment-request.pdf',
+                  content: buffer,
+                },
+              ],
+            })
+            console.log(`Email sent to ${email}`)
+          } catch (err) {
+            console.error(`Failed to send email to ${email}:`, err instanceof Error ? err.message : 'Unknown error')
+            // Try fallback port if first attempt fails (465 -> 587 or 587 -> 465)
+            const fallbackPort = usePort465 ? 587 : 465
+            try {
+              console.log(`Trying fallback port ${fallbackPort} for ${email}`)
+              const fallbackTransporter = createTransporter(fallbackPort, fallbackPort === 465)
+              await fallbackTransporter.sendMail({
+                from: fromAddress,
                 to: email,
                 subject: emailSubject,
                 html: emailBody,
@@ -161,43 +194,47 @@ export async function POST(request: NextRequest) {
                     content: buffer,
                   },
                 ],
-              }),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Email send timeout')), 30000)
-              )
-            ])
-            console.log(`Email sent to ${email}`)
-          } catch (err) {
-            console.error(`Failed to send email to ${email}:`, err instanceof Error ? err.message : 'Unknown error')
-            // Try fallback port if first attempt fails
-            if (!usePort465 && smtpPort === 587) {
-              try {
-                const fallbackTransporter = createTransporter(465, true)
-                await fallbackTransporter.sendMail({
-                  from: process.env.SMTP_FROM || process.env.SMTP_USER,
-                  to: email,
-                  subject: emailSubject,
-                  html: emailBody,
-                  attachments: [
-                    {
-                      filename: 'equipment-request.pdf',
-                      content: buffer,
-                    },
-                  ],
-                })
-                console.log(`Email sent to ${email} via fallback port 465`)
-              } catch (fallbackErr) {
-                console.error(`Fallback also failed for ${email}`)
-              }
+              })
+              console.log(`Email sent to ${email} via fallback port ${fallbackPort}`)
+            } catch (fallbackErr) {
+              console.error(`Fallback also failed for ${email}:`, fallbackErr instanceof Error ? fallbackErr.message : 'Unknown error')
             }
           }
         })
 
         // Send confirmation email to requester
         try {
-          await Promise.race([
-            transporter.sendMail({
-              from: process.env.SMTP_FROM || process.env.SMTP_USER,
+          await transporter.sendMail({
+            from: fromAddress,
+            to: requesterEmail,
+            subject: 'Equipment Request Confirmation',
+            html: `
+              <h2>Your Equipment Request Has Been Submitted</h2>
+              <p>Dear ${requesterName},</p>
+              <p>Thank you for submitting your equipment request. Your request has been received and will be processed shortly.</p>
+              <p><strong>Request ID:</strong> ${requestId}</p>
+              <p>Please see the attached PDF for a copy of your request.</p>
+              <p>You will receive a notification email once your request has been reviewed.</p>
+              <p>Best regards,<br>Equipment Request System</p>
+              ${emailFooter}
+            `,
+            attachments: [
+              {
+                filename: 'equipment-request.pdf',
+                content: buffer,
+              },
+            ],
+          })
+          console.log(`Confirmation email sent to requester`)
+        } catch (err) {
+          console.error(`Failed to send confirmation email:`, err instanceof Error ? err.message : 'Unknown error')
+          // Try fallback port for requester email too
+          const fallbackPort = usePort465 ? 587 : 465
+          try {
+            console.log(`Trying fallback port ${fallbackPort} for requester confirmation email`)
+            const fallbackTransporter = createTransporter(fallbackPort, fallbackPort === 465)
+            await fallbackTransporter.sendMail({
+              from: fromAddress,
               to: requesterEmail,
               subject: 'Equipment Request Confirmation',
               html: `
@@ -208,6 +245,7 @@ export async function POST(request: NextRequest) {
                 <p>Please see the attached PDF for a copy of your request.</p>
                 <p>You will receive a notification email once your request has been reviewed.</p>
                 <p>Best regards,<br>Equipment Request System</p>
+                ${emailFooter}
               `,
               attachments: [
                 {
@@ -215,14 +253,11 @@ export async function POST(request: NextRequest) {
                   content: buffer,
                 },
               ],
-            }),
-            new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Email send timeout')), 30000)
-            )
-          ])
-          console.log(`Confirmation email sent to requester`)
-        } catch (err) {
-          console.error(`Failed to send confirmation email:`, err instanceof Error ? err.message : 'Unknown error')
+            })
+            console.log(`Confirmation email sent via fallback port ${fallbackPort}`)
+          } catch (fallbackErr) {
+            console.error(`Fallback also failed for requester confirmation email`)
+          }
         }
 
         await Promise.all(emailPromises)

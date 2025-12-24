@@ -210,7 +210,7 @@ export default function ApprovalPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Approved By (Site Engineer / Manager) <span className="text-red-500">*</span>
+                    Approved By (Manager) <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="text"

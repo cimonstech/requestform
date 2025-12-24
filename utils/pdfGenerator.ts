@@ -24,6 +24,7 @@ interface FormData {
   approvalSignature?: string
   approvalSignatureType?: 'typed' | 'drawn'
   approvalDate?: string
+  isApproved?: boolean // true for approved, false for rejected
 }
 
 // Helper function to draw a simple gear icon
@@ -291,16 +292,6 @@ export async function generatePDF(data: FormData): Promise<Blob> {
     yPosition += 7
   }
 
-  if (data.requesterDate) {
-    const reqDate = new Date(data.requesterDate).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    })
-    doc.text(`Date: ${reqDate}`, margin + 5, yPosition)
-    yPosition += 10
-  }
-
   // Approval Section (only if approval data exists)
   if (data.approvedBy) {
     checkPageBreak(50)
@@ -314,7 +305,7 @@ export async function generatePDF(data: FormData): Promise<Blob> {
     doc.setFontSize(11)
     doc.setTextColor(0, 0, 0)
     
-    doc.text(`Approved By (Site Engineer / Manager): ${data.approvedBy}`, margin + 5, yPosition)
+    doc.text(`Approved By (Manager): ${data.approvedBy}`, margin + 5, yPosition)
     yPosition += 7
 
     if (data.approvalDate) {
@@ -360,6 +351,32 @@ export async function generatePDF(data: FormData): Promise<Blob> {
         doc.text(`Signature: ${approvalSig}`, margin + 5, yPosition)
         yPosition += 10
       }
+    }
+
+    // Add APPROVED or REJECTED stamp
+    if (data.isApproved !== undefined) {
+      const stampText = data.isApproved ? 'APPROVED' : 'REJECTED'
+      const stampColor = data.isApproved ? [16, 185, 129] : [239, 68, 68] // Green for approved, red for rejected
+      
+      // Create stamp using canvas (smaller size)
+      const stampCanvas = createCanvas(80, 30)
+      const stampCtx = stampCanvas.getContext('2d')
+      
+      // Draw text only (no circle)
+      stampCtx.fillStyle = `rgb(${stampColor[0]}, ${stampColor[1]}, ${stampColor[2]})`
+      stampCtx.font = 'bold 18px Arial'
+      stampCtx.textAlign = 'center'
+      stampCtx.textBaseline = 'middle'
+      stampCtx.fillText(stampText, 40, 15)
+      
+      // Convert to image and add to PDF
+      const stampImageData = stampCanvas.toDataURL('image/png')
+      const stampWidth = 50
+      const stampHeight = 20
+      const stampX = pageWidth - margin - 5 - stampWidth // Right side
+      const stampY = margin + 10 // Top right area
+      
+      doc.addImage(stampImageData, 'PNG', stampX, stampY, stampWidth, stampHeight)
     }
   }
 

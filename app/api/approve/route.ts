@@ -73,12 +73,25 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Try port 587 first, fallback to 465 if needed
-    const smtpPort = parseInt(process.env.SMTP_PORT || '587')
+    // Try port 465 first (SSL) since it's more reliable, fallback to 587 if needed
+    const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT) : 465
     let transporter = createTransporter(smtpPort, smtpPort === 465)
+    let usePort465 = smtpPort === 465
     
     // Skip SMTP verification to speed up the process
-    console.log(`Using SMTP port ${smtpPort} for approval email`)
+    console.log(`Using SMTP port ${smtpPort} (${usePort465 ? 'SSL' : 'TLS'}) for approval email`)
+
+    // Email sender name
+    const senderEmail = process.env.SMTP_FROM || process.env.SMTP_USER || ''
+    const senderName = 'RequestsbyCimons'
+    const fromAddress = `${senderName} <${senderEmail}>`
+    
+    // Footer for all emails
+    const emailFooter = `
+      <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 12px;">
+        <p style="margin: 5px 0;">Powered by <a href="https://wa.me/233553018172" style="color: #2563eb; text-decoration: none; font-weight: 600;">Cimons Technologies</a></p>
+      </div>
+    `
 
     // For now, we'll send to all recipients. In a real system, you'd look up the requester email from the requestId
     // This is a simplified version - you might want to store request data temporarily or use a database
@@ -111,6 +124,7 @@ export async function POST(request: NextRequest) {
         <p style="margin-top: 30px; color: #666; font-size: 12px;">
           Best regards,<br>Equipment Request System
         </p>
+        ${emailFooter}
       </div>
     `
 
@@ -164,6 +178,7 @@ export async function POST(request: NextRequest) {
       approvalSignature: signature || '',
       approvalSignatureType: signatureType || 'typed',
       approvalDate: approvalDate || new Date().toISOString().split('T')[0],
+      isApproved: isApproved, // Pass approval status for stamp
     })
 
     // Convert PDF blob to buffer for email attachment
@@ -182,9 +197,28 @@ export async function POST(request: NextRequest) {
     // Send email asynchronously (don't wait for it)
     const sendEmailAsync = async () => {
       try {
-        await Promise.race([
-          transporter.sendMail({
-            from: process.env.SMTP_FROM || process.env.SMTP_USER,
+        await transporter.sendMail({
+          from: fromAddress,
+          to: requestData.requesterEmail,
+          subject: emailSubject,
+          html: personalizedBody,
+          attachments: [
+            {
+              filename: `equipment-request-${statusText.toLowerCase()}-${requestId}.pdf`,
+              content: pdfBuffer,
+            },
+          ],
+        })
+        console.log(`Approval email sent successfully to ${requestData.requesterEmail}`)
+      } catch (emailErr) {
+        console.error('Failed to send approval email:', emailErr instanceof Error ? emailErr.message : 'Unknown error')
+        // Try fallback port if first attempt fails (465 -> 587 or 587 -> 465)
+        const fallbackPort = usePort465 ? 587 : 465
+        try {
+          console.log(`Trying fallback port ${fallbackPort} for approval email`)
+          const fallbackTransporter = createTransporter(fallbackPort, fallbackPort === 465)
+          await fallbackTransporter.sendMail({
+            from: fromAddress,
             to: requestData.requesterEmail,
             subject: emailSubject,
             html: personalizedBody,
@@ -194,34 +228,10 @@ export async function POST(request: NextRequest) {
                 content: pdfBuffer,
               },
             ],
-          }),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Email send timeout')), 30000)
-          )
-        ])
-        console.log(`Approval email sent successfully to ${requestData.requesterEmail}`)
-      } catch (emailErr) {
-        console.error('Failed to send approval email:', emailErr instanceof Error ? emailErr.message : 'Unknown error')
-        // Try fallback port if first attempt fails
-        if (smtpPort === 587) {
-          try {
-            const fallbackTransporter = createTransporter(465, true)
-            await fallbackTransporter.sendMail({
-              from: process.env.SMTP_FROM || process.env.SMTP_USER,
-              to: requestData.requesterEmail,
-              subject: emailSubject,
-              html: personalizedBody,
-              attachments: [
-                {
-                  filename: `equipment-request-${statusText.toLowerCase()}-${requestId}.pdf`,
-                  content: pdfBuffer,
-                },
-              ],
-            })
-            console.log(`Approval email sent via fallback port 465`)
-          } catch (fallbackErr) {
-            console.error('Fallback email sending also failed')
-          }
+          })
+          console.log(`Approval email sent via fallback port ${fallbackPort}`)
+        } catch (fallbackErr) {
+          console.error('Fallback email sending also failed:', fallbackErr instanceof Error ? fallbackErr.message : 'Unknown error')
         }
       }
     }
