@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
-import { getRequest, deleteRequest, getAllRequestIds, verifyApprovalToken, markTokenAsUsed } from '@/utils/requestStore'
+import { getRequest, deleteRequest, getAllRequestIds, verifyApprovalToken, markTokenAsUsed, updateApprovalStatus } from '@/utils/requestStore'
 import { generatePDF } from '@/utils/pdfGenerator'
 
 export async function POST(request: NextRequest) {
@@ -185,8 +185,17 @@ export async function POST(request: NextRequest) {
     const pdfArrayBuffer = await approvedPdfBlob.arrayBuffer()
     const pdfBuffer = Buffer.from(pdfArrayBuffer)
 
-    // Mark token as used FIRST (so approval succeeds even if email fails)
+    // Mark token as used and store approval status FIRST (so approval succeeds even if email fails)
     markTokenAsUsed(requestId)
+    
+    // Store approval status in request data
+    updateApprovalStatus(
+      requestId,
+      isApproved ? 'approved' : 'rejected',
+      approverName,
+      approvalDate || new Date().toISOString().split('T')[0],
+      comments
+    )
 
     // Send notification email to requester with approved PDF (async, non-blocking)
     const personalizedBody = emailBody.replace(

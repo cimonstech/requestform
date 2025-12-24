@@ -4,7 +4,8 @@ import { storeRequest, getNextRequestNumber, getAllRequestIds, generateApprovalT
 
 // All recipient emails for equipment request notifications
 const RECIPIENT_EMAILS = [
-  
+  'kanfram@gmail.com',
+  'ddickson@azmonlimited.com',
   'chasetetteh3@gmail.com'
 ]
 

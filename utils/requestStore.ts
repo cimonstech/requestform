@@ -27,6 +27,11 @@ interface RequestData {
   approvalToken: string
   tokenExpiresAt?: string // Optional expiration (ISO string)
   tokenUsed?: boolean // Single-use token flag
+  // Approval status tracking
+  approvalStatus?: 'pending' | 'approved' | 'rejected'
+  approvedBy?: string // Name of person who approved/rejected
+  approvalDate?: string // Date when approved/rejected
+  approvalComments?: string // Comments from approver
 }
 
 const STORE_FILE = path.join(process.cwd(), '.request-store.json')
@@ -161,6 +166,25 @@ export function markTokenAsUsed(requestId: string) {
   const requestData = getRequest(requestId)
   if (requestData) {
     requestData.tokenUsed = true
+    requestStore.set(requestId, requestData)
+    saveStore(requestStore)
+  }
+}
+
+// Update approval status
+export function updateApprovalStatus(
+  requestId: string,
+  status: 'approved' | 'rejected',
+  approvedBy: string,
+  approvalDate: string,
+  comments?: string
+) {
+  const requestData = getRequest(requestId)
+  if (requestData) {
+    requestData.approvalStatus = status
+    requestData.approvedBy = approvedBy
+    requestData.approvalDate = approvalDate
+    requestData.approvalComments = comments || ''
     requestStore.set(requestId, requestData)
     saveStore(requestStore)
   }

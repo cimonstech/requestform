@@ -19,13 +19,19 @@ export default function ApprovalPage() {
   const [signatureImage, setSignatureImage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [isVerifying, setIsVerifying] = useState(true)
+  const [approvalStatus, setApprovalStatus] = useState<{
+    status: 'pending' | 'approved' | 'rejected'
+    approvedBy?: string
+    approvalDate?: string
+    approvalComments?: string
+  } | null>(null)
   
   // Auto-timestamp for approval date
   const approvalDate = new Date().toISOString().split('T')[0]
 
-  // Verify token on page load
+  // Verify token and check approval status on page load
   useEffect(() => {
-    const verifyToken = async () => {
+    const verifyTokenAndCheckStatus = async () => {
       if (!token) {
         setStatus('unauthorized')
         setMessage('Invalid approval link. The link is missing the security token.')
@@ -34,20 +40,55 @@ export default function ApprovalPage() {
       }
 
       try {
-        const response = await fetch(`/api/verify-token?requestId=${requestId}&token=${token}`)
-        const data = await response.json()
+        // First verify the token
+        const verifyResponse = await fetch(`/api/verify-token?requestId=${requestId}&token=${token}`)
+        const verifyData = await verifyResponse.json()
         
-        if (!response.ok || !data.valid) {
+        if (!verifyResponse.ok || !verifyData.valid) {
           setStatus('unauthorized')
-          if (data.reason === 'expired') {
+          if (verifyData.reason === 'expired') {
             setMessage('This approval link has expired. Please request a new approval link.')
-          } else if (data.reason === 'used') {
-            setMessage('This approval link has already been used. Each link can only be used once for security.')
+          } else if (verifyData.reason === 'used') {
+            // Token is used - check if it was already approved/rejected
+            const statusResponse = await fetch(`/api/request-status?requestId=${requestId}`)
+            if (statusResponse.ok) {
+              const statusData = await statusResponse.json()
+              if (statusData.status && statusData.status !== 'pending') {
+                setApprovalStatus(statusData)
+                setStatus('unauthorized')
+                const statusText = statusData.status.toUpperCase()
+                const date = statusData.approvalDate 
+                  ? new Date(statusData.approvalDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+                  : 'Unknown date'
+                setMessage(`This request has already been ${statusText} by ${statusData.approvedBy || 'a manager'} on ${date}.`)
+              } else {
+                setMessage('This approval link has already been used. Each link can only be used once for security.')
+              }
+            } else {
+              setMessage('This approval link has already been used. Each link can only be used once for security.')
+            }
           } else {
             setMessage('Invalid or unauthorized approval link. Please use the link from your email.')
           }
         } else {
-          setStatus('idle')
+          // Token is valid - check if request is already approved/rejected
+          const statusResponse = await fetch(`/api/request-status?requestId=${requestId}`)
+          if (statusResponse.ok) {
+            const statusData = await statusResponse.json()
+            if (statusData.status && statusData.status !== 'pending') {
+              setApprovalStatus(statusData)
+              setStatus('unauthorized')
+              const statusText = statusData.status.toUpperCase()
+              const date = statusData.approvalDate 
+                ? new Date(statusData.approvalDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+                : 'Unknown date'
+              setMessage(`This request has already been ${statusText} by ${statusData.approvedBy || 'a manager'} on ${date}.`)
+            } else {
+              setStatus('idle')
+            }
+          } else {
+            setStatus('idle')
+          }
         }
       } catch (error) {
         setStatus('unauthorized')
@@ -57,7 +98,7 @@ export default function ApprovalPage() {
       }
     }
 
-    verifyToken()
+    verifyTokenAndCheckStatus()
   }, [requestId, token])
 
   const handleApprove = async () => {
@@ -164,6 +205,68 @@ export default function ApprovalPage() {
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  // Show loading state while verifying token
+  if (isVerifying) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 py-8 px-4 flex items-center justify-center">
+        <div className="bg-white rounded-xl shadow-lg p-8 text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-gray-600">Verifying approval link...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Show unauthorized state or already approved/rejected
+  if (status === 'unauthorized') {
+    const isAlreadyHandled = approvalStatus && approvalStatus.status !== 'pending'
+    const statusColor = approvalStatus?.status === 'approved' ? 'text-green-600' : 'text-red-600'
+    const statusIcon = approvalStatus?.status === 'approved' ? '✓' : '✗'
+    const bgColor = approvalStatus?.status === 'approved' ? 'bg-green-50' : 'bg-red-50'
+    const borderColor = approvalStatus?.status === 'approved' ? 'border-green-200' : 'border-red-200'
+    
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 py-8 px-4 flex items-center justify-center">
+        <div className={`bg-white rounded-xl shadow-lg p-8 max-w-md ${isAlreadyHandled ? bgColor : ''} ${isAlreadyHandled ? borderColor : ''} ${isAlreadyHandled ? 'border-2' : ''}`}>
+          <div className="text-center">
+            <div className={`${statusColor} text-5xl mb-4`}>{isAlreadyHandled ? statusIcon : '🔒'}</div>
+            <h1 className="text-2xl font-bold text-gray-800 mb-4">
+              {isAlreadyHandled ? 'Request Already Processed' : 'Unauthorized Access'}
+            </h1>
+            <p className="text-gray-600 mb-6">{message}</p>
+            {isAlreadyHandled && approvalStatus && (
+              <div className="bg-white rounded-lg p-4 mb-4 text-left border border-gray-200">
+                <p className="text-sm text-gray-700 mb-2">
+                  <strong>Status:</strong> <span className={statusColor}>{approvalStatus.status.toUpperCase()}</span>
+                </p>
+                {approvalStatus.approvedBy && (
+                  <p className="text-sm text-gray-700 mb-2">
+                    <strong>Approved By:</strong> {approvalStatus.approvedBy}
+                  </p>
+                )}
+                {approvalStatus.approvalDate && (
+                  <p className="text-sm text-gray-700 mb-2">
+                    <strong>Date:</strong> {new Date(approvalStatus.approvalDate).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+                  </p>
+                )}
+                {approvalStatus.approvalComments && (
+                  <p className="text-sm text-gray-700">
+                    <strong>Comments:</strong> {approvalStatus.approvalComments}
+                  </p>
+                )}
+              </div>
+            )}
+            <p className="text-sm text-gray-500">
+              {isAlreadyHandled 
+                ? 'This request has already been processed and cannot be modified.'
+                : 'For security reasons, approval links are unique, time-limited, and can only be used once.'}
+            </p>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (status === 'success') {
