@@ -1,13 +1,16 @@
 'use client'
 
-import { useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useState, useEffect } from 'react'
+import { useParams, useSearchParams } from 'next/navigation'
 import SignaturePad from '@/components/SignaturePad'
 
 export default function ApprovalPage() {
   const params = useParams()
+  const searchParams = useSearchParams()
   const requestId = params.requestId as string
-  const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const token = searchParams.get('token')
+  
+  const [status, setStatus] = useState<'idle' | 'success' | 'error' | 'unauthorized'>('idle')
   const [message, setMessage] = useState('')
   const [approverName, setApproverName] = useState('')
   const [comments, setComments] = useState('')
@@ -15,9 +18,47 @@ export default function ApprovalPage() {
   const [typedSignature, setTypedSignature] = useState('')
   const [signatureImage, setSignatureImage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isVerifying, setIsVerifying] = useState(true)
   
   // Auto-timestamp for approval date
   const approvalDate = new Date().toISOString().split('T')[0]
+
+  // Verify token on page load
+  useEffect(() => {
+    const verifyToken = async () => {
+      if (!token) {
+        setStatus('unauthorized')
+        setMessage('Invalid approval link. The link is missing the security token.')
+        setIsVerifying(false)
+        return
+      }
+
+      try {
+        const response = await fetch(`/api/verify-token?requestId=${requestId}&token=${token}`)
+        const data = await response.json()
+        
+        if (!response.ok || !data.valid) {
+          setStatus('unauthorized')
+          if (data.reason === 'expired') {
+            setMessage('This approval link has expired. Please request a new approval link.')
+          } else if (data.reason === 'used') {
+            setMessage('This approval link has already been used. Each link can only be used once for security.')
+          } else {
+            setMessage('Invalid or unauthorized approval link. Please use the link from your email.')
+          }
+        } else {
+          setStatus('idle')
+        }
+      } catch (error) {
+        setStatus('unauthorized')
+        setMessage('Failed to verify approval link. Please try again or contact support.')
+      } finally {
+        setIsVerifying(false)
+      }
+    }
+
+    verifyToken()
+  }, [requestId, token])
 
   const handleApprove = async () => {
     if (!approverName.trim()) {
@@ -44,6 +85,7 @@ export default function ApprovalPage() {
         },
         body: JSON.stringify({
           requestId,
+          token, // Include token for verification
           action: 'approve',
           approverName,
           comments,
@@ -96,6 +138,7 @@ export default function ApprovalPage() {
         },
         body: JSON.stringify({
           requestId,
+          token, // Include token for verification
           action: 'reject',
           approverName,
           comments,

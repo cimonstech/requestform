@@ -106,6 +106,14 @@ export default function EquipmentRequestForm() {
       formData.append('requesterEmail', requesterEmail)
       formData.append('department', department)
       formData.append('equipmentItems', JSON.stringify(equipmentItems.filter(item => item.name.trim())))
+      // Add all form fields for storage and PDF regeneration
+      formData.append('companyName', companyName)
+      formData.append('projectSiteName', projectSiteName)
+      formData.append('dateOfRequest', dateOfRequest)
+      formData.append('requesterPosition', requesterPosition)
+      formData.append('signature', signatureType === 'typed' ? typedSignature : signatureImage || '')
+      formData.append('signatureType', signatureType)
+      formData.append('requesterDate', requesterDate)
 
       // Send email
       const response = await fetch('/api/send-email', {

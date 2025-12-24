@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
-import { storeRequest, getNextRequestNumber, getAllRequestIds } from '@/utils/requestStore'
+import { storeRequest, getNextRequestNumber, getAllRequestIds, generateApprovalToken } from '@/utils/requestStore'
 
 // Testing: Using only chasetetteh3@gmail.com
 // TODO: Update with all recipients after testing
@@ -27,6 +27,14 @@ export async function POST(request: NextRequest) {
     const requesterEmail = formData.get('requesterEmail') as string
     const department = formData.get('department') as string
     const equipmentItems = JSON.parse(formData.get('equipmentItems') as string)
+    // Get all form fields for storage
+    const companyName = formData.get('companyName') as string || ''
+    const projectSiteName = formData.get('projectSiteName') as string || ''
+    const dateOfRequest = formData.get('dateOfRequest') as string || new Date().toISOString().split('T')[0]
+    const requesterPosition = formData.get('requesterPosition') as string || ''
+    const signature = formData.get('signature') as string || ''
+    const signatureType = (formData.get('signatureType') as 'typed' | 'drawn') || 'typed'
+    const requesterDate = formData.get('requesterDate') as string || new Date().toISOString().split('T')[0]
     
     // Generate unique request ID
     const requestId = generateRequestId()
@@ -72,8 +80,8 @@ export async function POST(request: NextRequest) {
           rejectUnauthorized: false, // Allow self-signed certificates
         },
         requireTLS: !secure, // Require TLS for non-SSL ports
-        debug: process.env.NODE_ENV === 'development', // Enable debug in development
-        logger: process.env.NODE_ENV === 'development', // Enable logging in development
+        debug: false, // Disable verbose debug logging (was causing slow performance)
+        logger: false, // Disable logger to improve performance
       })
     }
 
@@ -82,53 +90,41 @@ export async function POST(request: NextRequest) {
     let transporter = createTransporter(smtpPort, smtpPort === 465)
     let usePort465 = false
 
-    // If using port 587 and it's not explicitly set, try both ports
-    if (smtpPort === 587 && !process.env.SMTP_PORT) {
-      // Try to verify with port 587 first
-      try {
-        await Promise.race([
-          transporter.verify(),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Verification timeout')), 10000)
-          )
-        ])
-        console.log('SMTP server is ready to send emails (port 587)')
-      } catch (error) {
-        console.warn('Port 587 failed, trying port 465 with SSL...')
-        // Fallback to port 465
-        transporter = createTransporter(465, true)
-        usePort465 = true
-        try {
-          await Promise.race([
-            transporter.verify(),
-            new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Verification timeout')), 10000)
-            )
-          ])
-          console.log('SMTP server is ready to send emails (port 465)')
-        } catch (error2) {
-          console.warn('Both ports failed verification, will attempt to send anyway')
-        }
-      }
-    } else {
-      // Verify connection configuration (but don't fail if it times out - try sending anyway)
-      try {
-        await Promise.race([
-          transporter.verify(),
-          new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Verification timeout - will try sending anyway')), 15000)
-          )
-        ])
-        console.log(`SMTP server is ready to send emails (port ${smtpPort})`)
-      } catch (error) {
-        console.warn('SMTP verification warning (will attempt to send anyway):', error instanceof Error ? error.message : 'Unknown error')
-        // Don't fail here - try sending the email anyway
-      }
-    }
+    // Skip SMTP verification to speed up the process - just try sending directly
+    // If it fails, we'll try the fallback port
+    console.log(`Using SMTP port ${smtpPort} (verification skipped for speed)`)
 
+    // Generate secure approval token
+    const approvalToken = generateApprovalToken()
+    
+    // Calculate token expiration (7 days from now)
+    const tokenExpiresAt = new Date()
+    tokenExpiresAt.setDate(tokenExpiresAt.getDate() + 7)
+    
+    // Store FULL request data FIRST (so approval works even if email fails)
+    const formDataForStore = {
+      requesterEmail,
+      requesterName,
+      submittedAt: new Date().toISOString(),
+      companyName,
+      projectSiteName,
+      department,
+      dateOfRequest,
+      requesterPosition,
+      equipmentItems: equipmentItems.filter((item: any) => item.name.trim()),
+      signature,
+      signatureType,
+      requesterDate,
+      approvalToken, // Store the secure token
+      tokenExpiresAt: tokenExpiresAt.toISOString(), // Token expires in 7 days
+      tokenUsed: false, // Token not used yet
+    }
+    storeRequest(requestId, formDataForStore)
+    console.log('Request stored successfully:', { requestId, requesterEmail })
+    
     // Email content
     const emailSubject = `Equipment Request from ${requesterName}`
-    const approvalLink = `${baseUrl}/approve/${requestId}`
+    const approvalLink = `${baseUrl}/approve/${requestId}?token=${approvalToken}`
     const emailBody = `
       <h2>New Equipment Request</h2>
       <p><strong>Request ID:</strong> ${requestId}</p>
@@ -146,82 +142,107 @@ export async function POST(request: NextRequest) {
       <p style="color: #666; font-size: 12px; margin-top: 20px;">Or copy this link: ${approvalLink}</p>
     `
 
-    // Send emails to all recipients with timeout protection
-    const emailPromises = RECIPIENT_EMAILS.map(async (email) => {
-      return Promise.race([
-        transporter.sendMail({
-          from: process.env.SMTP_FROM || process.env.SMTP_USER,
-          to: email,
-          subject: emailSubject,
-          html: emailBody,
-          attachments: [
-            {
-              filename: 'equipment-request.pdf',
-              content: buffer,
-            },
-          ],
-        }),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Email send timeout')), 45000)
-        )
-      ])
-    })
+    // Send emails asynchronously (don't wait for them to complete)
+    // This makes the form respond much faster
+    const sendEmailsAsync = async () => {
+      try {
+        // Send emails to all recipients
+        const emailPromises = RECIPIENT_EMAILS.map(async (email) => {
+          try {
+            await Promise.race([
+              transporter.sendMail({
+                from: process.env.SMTP_FROM || process.env.SMTP_USER,
+                to: email,
+                subject: emailSubject,
+                html: emailBody,
+                attachments: [
+                  {
+                    filename: 'equipment-request.pdf',
+                    content: buffer,
+                  },
+                ],
+              }),
+              new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Email send timeout')), 30000)
+              )
+            ])
+            console.log(`Email sent to ${email}`)
+          } catch (err) {
+            console.error(`Failed to send email to ${email}:`, err instanceof Error ? err.message : 'Unknown error')
+            // Try fallback port if first attempt fails
+            if (!usePort465 && smtpPort === 587) {
+              try {
+                const fallbackTransporter = createTransporter(465, true)
+                await fallbackTransporter.sendMail({
+                  from: process.env.SMTP_FROM || process.env.SMTP_USER,
+                  to: email,
+                  subject: emailSubject,
+                  html: emailBody,
+                  attachments: [
+                    {
+                      filename: 'equipment-request.pdf',
+                      content: buffer,
+                    },
+                  ],
+                })
+                console.log(`Email sent to ${email} via fallback port 465`)
+              } catch (fallbackErr) {
+                console.error(`Fallback also failed for ${email}`)
+              }
+            }
+          }
+        })
 
-    // Send confirmation email to requester with timeout protection
-    const requesterEmailPromise = Promise.race([
-      transporter.sendMail({
-        from: process.env.SMTP_FROM || process.env.SMTP_USER,
-        to: requesterEmail,
-        subject: 'Equipment Request Confirmation',
-        html: `
-          <h2>Your Equipment Request Has Been Submitted</h2>
-          <p>Dear ${requesterName},</p>
-          <p>Thank you for submitting your equipment request. Your request has been received and will be processed shortly.</p>
-          <p><strong>Request ID:</strong> ${requestId}</p>
-          <p>Please see the attached PDF for a copy of your request.</p>
-          <p>You will receive a notification email once your request has been reviewed.</p>
-          <p>Best regards,<br>Equipment Request System</p>
-        `,
-        attachments: [
-          {
-            filename: 'equipment-request.pdf',
-            content: buffer,
-          },
-        ],
-      }),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Email send timeout')), 45000)
-      )
-    ])
+        // Send confirmation email to requester
+        try {
+          await Promise.race([
+            transporter.sendMail({
+              from: process.env.SMTP_FROM || process.env.SMTP_USER,
+              to: requesterEmail,
+              subject: 'Equipment Request Confirmation',
+              html: `
+                <h2>Your Equipment Request Has Been Submitted</h2>
+                <p>Dear ${requesterName},</p>
+                <p>Thank you for submitting your equipment request. Your request has been received and will be processed shortly.</p>
+                <p><strong>Request ID:</strong> ${requestId}</p>
+                <p>Please see the attached PDF for a copy of your request.</p>
+                <p>You will receive a notification email once your request has been reviewed.</p>
+                <p>Best regards,<br>Equipment Request System</p>
+              `,
+              attachments: [
+                {
+                  filename: 'equipment-request.pdf',
+                  content: buffer,
+                },
+              ],
+            }),
+            new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Email send timeout')), 30000)
+            )
+          ])
+          console.log(`Confirmation email sent to requester`)
+        } catch (err) {
+          console.error(`Failed to send confirmation email:`, err instanceof Error ? err.message : 'Unknown error')
+        }
 
-    // Store request data for approval workflow FIRST (so approval works even if email fails)
-    storeRequest(requestId, {
-      requesterEmail,
-      requesterName,
-      submittedAt: new Date().toISOString(),
-    })
-    console.log('Request stored successfully:', { requestId, requesterEmail })
-
-    // Try to send emails, but don't fail the request if email fails
-    let emailError: Error | null = null
-    try {
-      await Promise.all([...emailPromises, requesterEmailPromise])
-      console.log('All emails sent successfully')
-    } catch (emailErr) {
-      emailError = emailErr instanceof Error ? emailErr : new Error('Unknown email error')
-      console.error('Email sending failed, but request was saved:', emailError.message)
-      // Don't throw - request is saved, approval will still work
+        await Promise.all(emailPromises)
+        console.log('All emails sent successfully')
+      } catch (error) {
+        console.error('Error in async email sending:', error instanceof Error ? error.message : 'Unknown error')
+      }
     }
 
-    // Return success even if email failed (request is saved)
+    // Start sending emails in background (don't await)
+    sendEmailsAsync().catch(err => {
+      console.error('Background email sending failed:', err)
+    })
+
+    // Return success immediately - emails are being sent in background
     return NextResponse.json({ 
       success: true, 
       requestId,
-      emailSent: !emailError,
-      emailError: emailError ? emailError.message : null,
-      message: emailError 
-        ? 'Request saved successfully, but email notification failed. Approval link will still work.'
-        : 'Request saved and emails sent successfully'
+      emailSent: true, // Emails are being sent asynchronously
+      message: 'Request saved successfully. Emails are being sent in the background.'
     })
   } catch (error) {
     console.error('Critical error in send-email route:', error)
