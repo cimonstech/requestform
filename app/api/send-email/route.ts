@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
 import { storeRequest, getNextRequestNumber, getAllRequestIds, generateApprovalToken } from '@/utils/requestStore'
 
+// Force dynamic rendering (uses FormData and file operations)
+export const dynamic = 'force-dynamic'
+
 // All recipient emails for equipment request notifications
 const RECIPIENT_EMAILS = [
   'kanfram@gmail.com',

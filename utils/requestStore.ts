@@ -1,4 +1,6 @@
 // Simple file-based store for request data (persists across server restarts)
+// NOTE: File-based storage does NOT work on Vercel (serverless functions are stateless)
+// For Vercel deployment, you MUST migrate to a database (Vercel KV, Supabase, MongoDB, etc.)
 // In production, replace this with a database
 import fs from 'fs'
 import path from 'path'

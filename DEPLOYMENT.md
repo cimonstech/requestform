@@ -1,8 +1,10 @@
-# Deployment Guide
+# VPS Deployment Guide
 
 ## Deployment to VPS (72.62.4.222)
 
 ### Subdomain: azmon.cimonstech.cloud
+
+**✅ VPS is the recommended deployment option** - File-based storage works perfectly on VPS (unlike serverless platforms like Vercel where it won't persist).
 
 ## Prerequisites
 
@@ -10,6 +12,7 @@
 2. PM2 or similar process manager
 3. Nginx configured for reverse proxy
 4. Domain DNS pointing to VPS IP (72.62.4.222)
+5. **Note:** This deployment uses subdomain `azmon.cimonstech.cloud` and will NOT affect existing apps on the VPS (like ventechgadgets.com)
 
 ## Step 1: Prepare the Application
 
@@ -18,15 +21,61 @@
 npm run build
 ```
 
-2. Create production `.env` file with:
+2. Create production `.env` file:
+
+**Option 1: Using nano (recommended for beginners):**
+```bash
+cd /var/www/azmon-request-form
+nano .env
+```
+
+Then paste the following content:
 ```env
 SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
+SMTP_PORT=465
 SMTP_USER=your-email@gmail.com
 SMTP_PASSWORD=your-app-password
 SMTP_FROM=your-email@gmail.com
 NEXT_PUBLIC_BASE_URL=https://azmon.cimonstech.cloud
+NODE_ENV=production
 ```
+
+**To save in nano:**
+- Press `Ctrl + O` (to write/out)
+- Press `Enter` (to confirm filename)
+- Press `Ctrl + X` (to exit)
+
+**Option 2: Using vi/vim:**
+```bash
+cd /var/www/azmon-request-form
+vi .env
+```
+
+Then:
+- Press `i` to enter insert mode
+- Paste the content above
+- Press `Esc` to exit insert mode
+- Type `:wq` and press `Enter` to save and quit
+
+**Option 3: Using echo (quick method):**
+```bash
+cd /var/www/azmon-request-form
+cat > .env << 'EOF'
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_USER=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
+SMTP_FROM=your-email@gmail.com
+NEXT_PUBLIC_BASE_URL=https://azmon.cimonstech.cloud
+NODE_ENV=production
+EOF
+```
+
+**Important:**
+- Replace `your-email@gmail.com` with your actual Gmail address
+- Replace `your-app-password` with your Gmail App Password (not your regular password)
+- Make sure `NEXT_PUBLIC_BASE_URL` matches your actual domain
+- The app defaults to port 465 (SSL) which is more reliable. If you need to use 587, set `SMTP_PORT=587`
 
 ## Step 2: Deploy to VPS
 
@@ -70,10 +119,12 @@ npm run build
 npm install -g pm2
 ```
 
-2. Start the application:
+2. Start the application on port 3001 (to avoid conflicts with other apps):
 ```bash
-pm2 start npm --name "azmon-request-form" -- start
+pm2 start npm --name "azmon-request-form" -- start:3001
 ```
+
+**Note:** Using port 3001 to avoid conflicts with other applications on the VPS (like ventechgadgets.com). The app will run independently on the `azmon.cimonstech.cloud` subdomain.
 
 3. Save PM2 configuration:
 ```bash
@@ -101,7 +152,7 @@ server {
     server_name azmon.cimonstech.cloud;
 
     location / {
-        proxy_pass http://localhost:3000;
+        proxy_pass http://localhost:3001;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -113,6 +164,11 @@ server {
     }
 }
 ```
+
+**Important:** 
+- This configuration only affects `azmon.cimonstech.cloud` subdomain
+- Your existing `ventechgadgets.com` configuration remains untouched
+- The app runs on port 3001 to avoid conflicts with other apps
 
 Enable the site:
 ```bash
@@ -136,22 +192,14 @@ sudo certbot --nginx -d azmon.cimonstech.cloud
 
 3. Certbot will automatically update Nginx configuration for HTTPS
 
-## Step 6: Update Email Recipients
+## Step 6: Verify Configuration
 
-After testing, update `app/api/send-email/route.ts`:
-```typescript
-const RECIPIENT_EMAILS = [
-  'ddickson@azmonlimited.com',
-  'kanfram@gmail.com',
-  'chasetetteh3@gmail.com'
-]
-```
+The email recipients are already configured to send to:
+- ddickson@azmonlimited.com
+- kanfram@gmail.com
+- chasetetteh3@gmail.com
 
-Then rebuild:
-```bash
-npm run build
-pm2 restart azmon-request-form
-```
+No changes needed unless you want to modify recipients.
 
 ## Monitoring & Maintenance
 
@@ -180,14 +228,17 @@ pm2 restart azmon-request-form
 
 ## Troubleshooting
 
-1. **Port 3000 not accessible**: Check firewall settings
-2. **Nginx 502 error**: Check if Next.js app is running on port 3000
+1. **Port 3001 not accessible**: Check firewall settings (ensure port 3001 is open)
+2. **Nginx 502 error**: Check if Next.js app is running on port 3001: `pm2 logs azmon-request-form`
+3. **Port conflict**: If 3001 is also in use, change to another port (3002, 3003, etc.) and update both PM2 command and Nginx config
 3. **Email not sending**: Verify SMTP credentials in `.env`
 4. **SSL issues**: Ensure DNS is properly configured and pointing to VPS IP
 
 ## Notes
 
-- The in-memory request store will reset on server restart. Consider implementing a database for production.
-- Replace PWA icons with actual images before deployment.
-- Monitor PM2 logs regularly for any errors.
+- ✅ **File-based storage works on VPS**: The `.request-store.json` file will persist across server restarts on a VPS (unlike Vercel where it won't work)
+- ✅ **Email recipients**: Already configured to send to all three recipients (ddickson@azmonlimited.com, kanfram@gmail.com, chasetetteh3@gmail.com)
+- ✅ **PWA icons**: Icon files are included in the repository
+- Monitor PM2 logs regularly for any errors
+- The application uses port 3000 by default - ensure it's not blocked by firewall
 

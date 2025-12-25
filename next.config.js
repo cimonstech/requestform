@@ -1,13 +1,18 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Ensure static files are properly served
-  generateBuildId: async () => {
-    return 'build-' + Date.now()
-  },
-  // Disable static optimization for development to avoid cache issues
+  output: 'standalone', // For VPS deployment
   experimental: {
     optimizePackageImports: ['jspdf'],
+    serverComponentsExternalPackages: ['canvas'], // Required for canvas in Node.js environment
+  },
+  webpack: (config, { isServer }) => {
+    // Handle canvas for server-side rendering
+    if (isServer) {
+      config.externals = config.externals || []
+      config.externals.push('canvas')
+    }
+    return config
   },
 }
 

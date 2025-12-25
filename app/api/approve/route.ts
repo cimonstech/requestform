@@ -3,6 +3,9 @@ import nodemailer from 'nodemailer'
 import { getRequest, deleteRequest, getAllRequestIds, verifyApprovalToken, markTokenAsUsed, updateApprovalStatus } from '@/utils/requestStore'
 import { generatePDF } from '@/utils/pdfGenerator'
 
+// Force dynamic rendering (uses FormData and file operations)
+export const dynamic = 'force-dynamic'
+
 export async function POST(request: NextRequest) {
   console.log('Approval API route called')
   try {

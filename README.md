@@ -73,12 +73,26 @@ The app can be installed as a Progressive Web App:
 
 ## Production Deployment
 
-For production deployment, ensure:
-1. Environment variables are set in your hosting platform (including `NEXT_PUBLIC_BASE_URL`)
+### Vercel Deployment (Recommended)
+
+Vercel is the recommended hosting platform for Next.js applications. See [VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md) for detailed instructions.
+
+**Quick Deploy:**
+1. Push your code to GitHub
+2. Import project in [Vercel Dashboard](https://vercel.com)
+3. Add environment variables (SMTP credentials, NEXT_PUBLIC_BASE_URL)
+4. Deploy!
+
+**⚠️ Important:** The file-based storage won't work on Vercel. You'll need to migrate to a database (Vercel KV, Supabase, etc.) for production. See VERCEL_DEPLOYMENT.md for details.
+
+### Other Platforms
+
+For other hosting platforms, ensure:
+1. Environment variables are set (including `NEXT_PUBLIC_BASE_URL`)
 2. SMTP credentials are secure and properly configured
 3. The application is built using `npm run build`
 4. Replace placeholder PWA icons with actual icons
-5. Consider replacing the in-memory request store (`utils/requestStore.ts`) with a database for production use
+5. Consider replacing the file-based request store (`utils/requestStore.ts`) with a database for production use
 
 ## Technical Notes
 
