@@ -1,7 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  output: 'standalone', // For VPS deployment
   experimental: {
     optimizePackageImports: ['jspdf'],
     serverComponentsExternalPackages: ['canvas'], // Required for canvas in Node.js environment

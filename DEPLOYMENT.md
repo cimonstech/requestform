@@ -11,12 +11,29 @@
 1. Node.js 18+ installed on VPS
 2. PM2 or similar process manager
 3. Nginx configured for reverse proxy
-4. Domain DNS pointing to VPS IP (72.62.4.222)
+4. **DNS configured**: A record for `azmon.cimonstech.cloud` pointing to `72.62.4.222` (see Step 5)
 5. **Note:** This deployment uses subdomain `azmon.cimonstech.cloud` and will NOT affect existing apps on the VPS (like ventechgadgets.com)
 
 ## Step 1: Prepare the Application
 
-1. Build the application:
+1. **Clone or pull the latest code:**
+```bash
+# If cloning for the first time:
+cd /var/www
+git clone https://github.com/cimonstech/requestform.git azmon-request-form
+cd azmon-request-form
+
+# If repository already exists, pull latest changes:
+cd /var/www/azmon-request-form
+git pull origin main
+```
+
+2. **Install dependencies:**
+```bash
+npm install --production=false
+```
+
+3. **Build the application:**
 ```bash
 npm run build
 ```
@@ -121,8 +138,10 @@ npm install -g pm2
 
 2. Start the application on port 3001 (to avoid conflicts with other apps):
 ```bash
-pm2 start npm --name "azmon-request-form" -- start:3001
+pm2 start npm --name "azmon-request-form" -- run start:3001
 ```
+
+**Note:** Use `npm run start:3001` (not `npm start:3001`)
 
 **Note:** Using port 3001 to avoid conflicts with other applications on the VPS (like ventechgadgets.com). The app will run independently on the `azmon.cimonstech.cloud` subdomain.
 
@@ -177,7 +196,48 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-## Step 5: Setup SSL with Let's Encrypt
+## Step 5: Configure DNS (REQUIRED BEFORE SSL)
+
+**⚠️ IMPORTANT: You must set up DNS before getting an SSL certificate!**
+
+**Note:** You don't need to "create" the subdomain in Hostinger. Just add a DNS A record - the subdomain will work automatically once the DNS record is set.
+
+### For Hostinger Users:
+
+1. **Log into your Hostinger account** (hpanel.hostinger.com)
+
+2. **Navigate to DNS settings:**
+   - Go to **Domains** → Select `cimonstech.cloud`
+   - Click on **DNS / Name Servers** or **DNS Zone Editor**
+
+3. **Add an A record:**
+   - Click **Add Record** or **+ Add**
+   - **Type**: Select **A**
+   - **Name/Host**: Enter `azmon` (just `azmon`, NOT `azmon.cimonstech.cloud`)
+   - **Points to/Value**: Enter `72.62.4.222`
+   - **TTL**: Leave as default (usually 3600)
+   - Click **Save** or **Add Record**
+
+4. **Wait for DNS propagation** (usually 5-30 minutes, can take up to 48 hours)
+   - Check if DNS is working: `nslookup azmon.cimonstech.cloud` or `dig azmon.cimonstech.cloud`
+   - Or use online tools: https://dnschecker.org/ (enter `azmon.cimonstech.cloud`)
+
+5. **Verify DNS is pointing correctly**:
+   ```bash
+   # On your VPS or local machine
+   ping azmon.cimonstech.cloud
+   # Should resolve to 72.62.4.222
+   ```
+
+**Only proceed to Step 6 after DNS is configured and propagated!**
+
+### Visual Guide:
+- In Hostinger DNS settings, you should see existing records like:
+  - `@` → points to some IP (your main domain)
+  - `www` → points to some IP
+  - You're adding: `azmon` → `72.62.4.222`
+
+## Step 6: Setup SSL with Let's Encrypt
 
 1. Install Certbot:
 ```bash
@@ -192,7 +252,7 @@ sudo certbot --nginx -d azmon.cimonstech.cloud
 
 3. Certbot will automatically update Nginx configuration for HTTPS
 
-## Step 6: Verify Configuration
+## Step 7: Verify Configuration
 
 The email recipients are already configured to send to:
 - ddickson@azmonlimited.com
@@ -231,6 +291,16 @@ pm2 restart azmon-request-form
 1. **Port 3001 not accessible**: Check firewall settings (ensure port 3001 is open)
 2. **Nginx 502 error**: Check if Next.js app is running on port 3001: `pm2 logs azmon-request-form`
 3. **Port conflict**: If 3001 is also in use, change to another port (3002, 3003, etc.) and update both PM2 command and Nginx config
+4. **Module not found errors** (e.g., `Can't resolve '@/components/EquipmentRequestForm'`):
+   - **Solution 1**: Make sure you've pulled the latest code: `git pull origin main`
+   - **Solution 2**: Verify files exist: `ls -la components/ utils/`
+   - **Solution 3**: Clean and reinstall: 
+     ```bash
+     rm -rf node_modules .next
+     npm install
+     npm run build
+     ```
+   - **Solution 4**: Check if files are tracked: `git ls-files components/ utils/`
 3. **Email not sending**: Verify SMTP credentials in `.env`
 4. **SSL issues**: Ensure DNS is properly configured and pointing to VPS IP
 
